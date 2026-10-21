@@ -56,10 +56,10 @@ Use the automated preparation script for the easiest setup:
 
 ```bash
 # Download and run the preparation script
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/xingyu4j/sub2api/main/deploy/docker-deploy.sh | bash
 
 # Or download first, then run
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh -o docker-deploy.sh
+curl -sSL https://raw.githubusercontent.com/xingyu4j/sub2api/main/deploy/docker-deploy.sh -o docker-deploy.sh
 chmod +x docker-deploy.sh
 ./docker-deploy.sh
 ```
@@ -92,7 +92,7 @@ If you prefer manual control:
 
 ```bash
 # Clone repository
-git clone https://github.com/Wei-Shaw/sub2api.git
+git clone https://github.com/xingyu4j/sub2api.git
 cd sub2api/deploy
 
 # Configure environment
@@ -398,12 +398,12 @@ For production servers using systemd.
 ### One-Line Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/xingyu4j/sub2api/main/deploy/install.sh | sudo bash
 ```
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/Wei-Shaw/sub2api/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/xingyu4j/sub2api/releases)
 2. Extract and copy the binary to `/opt/sub2api/`
 3. Copy `sub2api.service` to `/etc/systemd/system/`
 4. Run:
@@ -413,6 +413,56 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
    sudo systemctl start sub2api
    ```
 5. Open the Setup Wizard in your browser to complete configuration
+
+### Releasing This Fork
+
+The installer, dashboard update checks, and rollback lists use releases from
+[`xingyu4j/sub2api`](https://github.com/xingyu4j/sub2api/releases). Docker deployments
+use `ghcr.io/xingyu4j/sub2api`. Copying the repository or pushing to `main` does
+not publish installable binaries or images.
+
+1. Enable GitHub Actions in this repository. The Release workflow declares
+   `contents: write` and `packages: write`; repository or organization policies
+   must allow these permissions.
+2. Commit and push the changes, then create and push a new version tag pointing
+   to that commit, such as `vX.Y.Z` (replace it with an actual numeric version).
+   Choose a version higher than the version currently installed on your servers
+   so dashboard update checks detect it.
+3. Wait for the **Release** workflow to finish. Use a full release:
+   `SIMPLE_RELEASE` must be unset or `false`; for a manual workflow run,
+   `simple_release` and `dry_run` must both be `false`. Simple releases only
+   publish an amd64 image and cannot be used by the binary installer or web updater.
+4. Confirm the published, non-prerelease Release contains
+   `sub2api_X.Y.Z_linux_amd64.tar.gz`, `sub2api_X.Y.Z_linux_arm64.tar.gz`, and
+   `checksums.txt`, and is selected as the latest release.
+5. For Docker deployments, make the `sub2api` GHCR package public so servers can
+   pull it anonymously. GHCR publishing uses the built-in `GITHUB_TOKEN`;
+   Docker Hub credentials are optional.
+
+### Switching an Existing Server
+
+For an existing installation made with the upstream `install.sh`, publish a full
+release containing these changes first, then run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xingyu4j/sub2api/main/deploy/install.sh | sudo bash -s -- upgrade
+```
+
+The upgrade replaces the binary and restarts the existing service, retaining
+its configuration and data. It also reinstalls the binary when the version
+number matches, which allows switching repositories at the same version.
+After this first upgrade, dashboard update checks and rollback lists use this
+repository. The old binary still uses upstream until it has been replaced.
+Use the command above for subsequent script upgrades as well; an old downloaded
+copy of `install.sh` still contains its original repository address.
+
+For an existing Docker deployment, change the `sub2api` service's image in your
+Compose file to `ghcr.io/xingyu4j/sub2api:latest`, then run:
+
+```bash
+docker compose pull sub2api
+docker compose up -d sub2api
+```
 
 ### Commands
 

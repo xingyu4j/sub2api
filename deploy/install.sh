@@ -2,7 +2,7 @@
 #
 # Sub2API Installation Script
 # Sub2API 安装脚本
-# Usage: curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | bash
+# Usage: curl -sSL https://raw.githubusercontent.com/xingyu4j/sub2api/main/deploy/install.sh | bash
 #
 
 set -e
@@ -31,7 +31,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-GITHUB_REPO="Wei-Shaw/sub2api"
+GITHUB_REPO="xingyu4j/sub2api"
 INSTALL_DIR="/opt/sub2api"
 SERVICE_NAME="sub2api"
 SERVICE_USER="sub2api"
@@ -718,7 +718,7 @@ install_service() {
     cat > /etc/systemd/system/sub2api.service << EOF
 [Unit]
 Description=Sub2API - AI API Gateway Platform
-Documentation=https://github.com/Wei-Shaw/sub2api
+Documentation=https://github.com/${GITHUB_REPO}
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
@@ -866,6 +866,9 @@ upgrade() {
     CURRENT_VERSION=$("$INSTALL_DIR/sub2api" --version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
     print_info "$(msg 'current_version'): $CURRENT_VERSION"
 
+    # Resolve the release before stopping the service (a new fork may have no releases yet).
+    get_latest_version
+
     # Stop service
     if systemctl is-active --quiet sub2api; then
         print_info "$(msg 'stopping_service')"
@@ -877,7 +880,6 @@ upgrade() {
     print_info "$(msg 'backup_created'): $INSTALL_DIR/sub2api.backup"
 
     # Download and install new version
-    get_latest_version
     download_and_extract
 
     # Set permissions

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -29,12 +30,15 @@ func (s *updateServiceCacheStub) SetUpdateInfo(_ context.Context, data string, _
 
 type updateServiceGitHubClientStub struct {
 	release        *GitHubRelease
+	latestErr      error
+	latestRepo     string
 	recentReleases []*GitHubRelease
 	recentErr      error
 }
 
-func (s *updateServiceGitHubClientStub) FetchLatestRelease(context.Context, string) (*GitHubRelease, error) {
-	return s.release, nil
+func (s *updateServiceGitHubClientStub) FetchLatestRelease(_ context.Context, repo string) (*GitHubRelease, error) {
+	s.latestRepo = repo
+	return s.release, s.latestErr
 }
 
 func (s *updateServiceGitHubClientStub) FetchRecentReleases(context.Context, string, int) ([]*GitHubRelease, error) {
@@ -47,6 +51,82 @@ func (s *updateServiceGitHubClientStub) DownloadFile(context.Context, string, st
 
 func (s *updateServiceGitHubClientStub) FetchChecksumFile(context.Context, string) ([]byte, error) {
 	panic("FetchChecksumFile should not be called when no update is available")
+}
+
+func TestUpdateServiceCheckUpdateIgnoresUpstreamCache(t *testing.T) {
+	for _, repository := range []string{"", "Wei-Shaw/sub2api"} {
+		for _, apiUnavailable := range []bool{false, true} {
+			name := repository
+			if name == "" {
+				name = "legacy cache"
+			}
+			if apiUnavailable {
+				name += "/API unavailable"
+			}
+			t.Run(name, func(t *testing.T) {
+				data, err := json.Marshal(map[string]any{
+					"repository": repository,
+					"latest":     "9.9.9",
+					"timestamp":  time.Now().Unix(),
+					"release_info": &ReleaseInfo{
+						HTMLURL: "https://github.com/Wei-Shaw/sub2api/releases/tag/v9.9.9",
+					},
+				})
+				require.NoError(t, err)
+				client := &updateServiceGitHubClientStub{
+					release: &GitHubRelease{TagName: "v0.1.149"},
+				}
+				if apiUnavailable {
+					client.latestErr = errors.New("release API unavailable")
+				}
+				svc := NewUpdateService(&updateServiceCacheStub{data: string(data)}, client, "0.1.148", "release")
+
+				info, err := svc.CheckUpdate(context.Background(), false)
+
+				require.NoError(t, err)
+				require.Equal(t, "xingyu4j/sub2api", client.latestRepo)
+				require.False(t, info.Cached)
+				if apiUnavailable {
+					require.False(t, info.HasUpdate)
+					require.Nil(t, info.ReleaseInfo)
+					require.Contains(t, info.Warning, "release API unavailable")
+					require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrNoUpdateAvailable)
+				} else {
+					require.True(t, info.HasUpdate)
+					require.Equal(t, "0.1.149", info.LatestVersion)
+				}
+			})
+		}
+	}
+}
+
+func TestUpdateServiceCheckUpdateReusesForkCache(t *testing.T) {
+	client := &updateServiceGitHubClientStub{
+		release: &GitHubRelease{
+			TagName: "v0.1.149",
+			HTMLURL: "https://github.com/xingyu4j/sub2api/releases/tag/v0.1.149",
+		},
+	}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, "0.1.148", "release")
+	_, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	client.latestErr = errors.New("release API unavailable")
+
+	info, err := svc.CheckUpdate(context.Background(), false)
+
+	require.NoError(t, err)
+	require.True(t, info.Cached)
+	require.True(t, info.HasUpdate)
+	require.Empty(t, info.Warning)
+	require.Equal(t, "0.1.149", info.LatestVersion)
+	require.Equal(t, client.release.HTMLURL, info.ReleaseInfo.HTMLURL)
+
+	info, err = svc.CheckUpdate(context.Background(), true)
+
+	require.NoError(t, err)
+	require.True(t, info.Cached)
+	require.Contains(t, info.Warning, "release API unavailable")
+	require.Equal(t, client.release.HTMLURL, info.ReleaseInfo.HTMLURL)
 }
 
 func TestUpdateServicePerformUpdateNoUpdateReturnsSentinel(t *testing.T) {
