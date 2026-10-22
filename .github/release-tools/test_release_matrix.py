@@ -119,7 +119,8 @@ class ReleaseMatrixTest(unittest.TestCase):
         for arch in ('amd64', 'arm64'):
             binary = Path('contexts') / arch / 'sub2api'
             self.assertEqual(binary.read_bytes(), b'fixture')
-            self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+            if os.name == 'posix':
+                self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
 
     def test_plan_requires_a_tag_for_publication(self):
         args = argparse.Namespace(ref='main', dry_run=False, simple=False)
@@ -138,6 +139,22 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertEqual(output['dry_run'], 'true')
         self.assertEqual(output['owner_lower'], 'exampleowner')
         self.assertEqual(len(json.loads(output['matrix'])['include']), 5)
+
+    def test_version_sync_does_not_downgrade_the_default_branch(self):
+        for version in ('9.8.6', '9.8.7'):
+            with self.subTest(version=version):
+                release.sync_version(argparse.Namespace(version=version))
+                self.assertEqual(release.VERSION_FILE.read_text(), '9.8.7\n')
+        release.sync_version(argparse.Namespace(version='9.8.8'))
+        self.assertEqual(release.VERSION_FILE.read_text(), '9.8.8\n')
+
+    def test_version_sync_promotes_prerelease_and_rejects_unstable_targets(self):
+        release.VERSION_FILE.write_text('9.8.7-rc.1\n')
+        release.sync_version(argparse.Namespace(version='9.8.7'))
+        self.assertEqual(release.VERSION_FILE.read_text(), '9.8.7\n')
+        for version in ('9.8.8-rc.1', 'v9.8.8', 'main'):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                release.sync_version(argparse.Namespace(version=version))
 
     def test_docker_commands_do_not_publish_during_dry_run(self):
         fake_bin = Path('bin')
@@ -184,6 +201,27 @@ class ReleaseMatrixTest(unittest.TestCase):
                     self.assertEqual(log.count('imagetools create'), 2)
                     self.assertIn('fixturehub/sub2api:9.8', log)
                     self.assertIn('ghcr.io/exampleowner/sub2api:9', log)
+
+    def test_prerelease_images_do_not_replace_stable_tags(self):
+        fake_bin = Path('bin')
+        fake_bin.mkdir()
+        docker = fake_bin / 'docker'
+        docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
+        docker.chmod(0o755)
+        for simple in (False, True):
+            with self.subTest(simple=simple):
+                log_path = Path(f'prerelease-{simple}.log').resolve()
+                env = {**os.environ, 'PATH': str(fake_bin.resolve()) + os.pathsep + os.environ['PATH'],
+                       'DOCKER_LOG': str(log_path), 'RUNNER_TEMP': self.temp.name,
+                       'RELEASE_VERSION': '9.8.7-rc.1', 'RELEASE_SHA': 'a' * 40,
+                       'GITHUB_REPOSITORY': 'ExampleOwner/sub2api', 'DRY_RUN': 'false',
+                       'SIMPLE_RELEASE': str(simple).lower(), 'DOCKERHUB_USERNAME': 'skip'}
+                subprocess.run(['bash', str(ROOT / '.github/release-tools/release-images.sh')], env=env, check=True)
+                log = log_path.read_text()
+                self.assertIn('ghcr.io/exampleowner/sub2api:9.8.7-rc.1', log)
+                self.assertNotIn(':latest', log)
+                self.assertNotIn('--tag ghcr.io/exampleowner/sub2api:9.8 ', log)
+                self.assertNotIn('--tag ghcr.io/exampleowner/sub2api:9 ', log)
 
 
 

@@ -154,6 +154,19 @@ def contexts(args):
         shutil.copytree('backend/resources', dest / 'backend/resources', dirs_exist_ok=True)
 
 
+def sync_version(args):
+    if not VERSION_RE.fullmatch(args.version) or '-' in args.version:
+        raise ValueError('VERSION synchronization requires a stable release version')
+    current = VERSION_FILE.read_text().strip()
+    if VERSION_RE.fullmatch(current):
+        current_base = tuple(map(int, current.split('-')[0].split('.')))
+        target = tuple(map(int, args.version.split('.')))
+        if target < current_base or (target == current_base and '-' not in current):
+            print('VERSION already matches or is newer than the released version')
+            return
+    VERSION_FILE.write_text(args.version + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -173,6 +186,9 @@ def main():
     for arg in ('version', 'sha', 'goos', 'goarch', 'output'):
         p.add_argument('--' + arg, required=True)
     p.set_defaults(run=collect)
+    p = commands.add_parser('sync-version')
+    p.add_argument('--version', required=True)
+    p.set_defaults(run=sync_version)
     for command, handler in [('verify', verify), ('contexts', contexts)]:
         p = commands.add_parser(command)
         for arg in ('version', 'sha', 'input'):
